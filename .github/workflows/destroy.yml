@@ -49,9 +49,30 @@ jobs:
       - name: Get Terraform Outputs
         id: tf_outputs
         working-directory: ./infra/terraform
+        shell: bash
         run: |
-          echo "datalake_bucket=$(terraform output -raw datalake_bucket_name)" >> $GITHUB_OUTPUT
-          echo "code_bucket=$(terraform output -raw code_bucket_name)" >> $GITHUB_OUTPUT
+          set -euo pipefail
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo apt-get update -y && sudo apt-get install -y jq
+          fi
+          JSON=$(terraform output -json || echo '{}')
+          DATALAKE=$(echo "$JSON" | jq -r '.datalake_bucket_name.value // empty')
+          CODE=$(echo   "$JSON" | jq -r '.code_bucket_name.value // empty')
+          # Fallback: try discover by name prefixes if outputs are missing
+          if [ -z "$DATALAKE" ]; then
+            DATALAKE=$(aws s3api list-buckets \
+              --query "Buckets[?starts_with(Name, 'aws-batch-realtime-medallion-dev-datalake')].Name | [0]" \
+              --output text || true)
+            [ "$DATALAKE" = "None" ] && DATALAKE=""
+          fi
+          if [ -z "$CODE" ]; then
+            CODE=$(aws s3api list-buckets \
+              --query "Buckets[?starts_with(Name, 'aws-batch-realtime-medallion-dev-code')].Name | [0]" \
+              --output text || true)
+            [ "$CODE" = "None" ] && CODE=""
+          fi
+          echo "datalake_bucket=$DATALAKE" >> $GITHUB_OUTPUT
+          echo "code_bucket=$CODE" >> $GITHUB_OUTPUT
       
       - name: Empty S3 Buckets (all versions)
         env:
