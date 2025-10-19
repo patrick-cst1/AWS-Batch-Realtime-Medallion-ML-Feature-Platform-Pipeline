@@ -110,7 +110,7 @@ resource "aws_kinesis_firehose_delivery_stream" "main" {
     error_output_prefix = "bronze/errors/!{firehose:error-output-type}/!{timestamp:yyyy/MM/dd}/"
     buffering_size      = 128
     buffering_interval  = 300
-    compression_format  = "UNCOMPRESSED"
+    compression_format  = "GZIP"
 
     cloudwatch_logging_options {
       enabled         = true
@@ -118,27 +118,7 @@ resource "aws_kinesis_firehose_delivery_stream" "main" {
       log_stream_name = aws_cloudwatch_log_stream.firehose.name
     }
 
-    data_format_conversion_configuration {
-      input_format_configuration {
-        deserializer {
-          open_x_json_ser_de {}
-        }
-      }
-
-      output_format_configuration {
-        serializer {
-          parquet_ser_de {
-            compression = "GZIP"
-          }
-        }
-      }
-
-      schema_configuration {
-        database_name = "default"
-        role_arn      = aws_iam_role.firehose.arn
-        table_name    = "card_authorization"
-      }
-    }
+    
 
     dynamic_partitioning_configuration {
       enabled = true

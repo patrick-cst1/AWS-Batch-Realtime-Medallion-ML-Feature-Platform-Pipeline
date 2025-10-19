@@ -37,7 +37,7 @@ variable "s3_lifecycle_days" {
 variable "stream_pipeline_schedule_minutes" {
   description = "Stream pipeline schedule in minutes"
   type        = number
-  default     = 10
+  default     = 60
 }
 
 variable "daily_pipeline_schedule_cron" {
