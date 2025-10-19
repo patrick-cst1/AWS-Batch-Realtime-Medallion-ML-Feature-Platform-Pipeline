@@ -46,6 +46,36 @@ jobs:
             -backend-config="region=${{ env.AWS_REGION }}" \
             -backend-config="dynamodb_table=${{ secrets.TF_BACKEND_DDB_TABLE }}"
       
+      - name: Get Terraform Outputs
+        id: tf_outputs
+        working-directory: ./infra/terraform
+        run: |
+          echo "datalake_bucket=$(terraform output -raw datalake_bucket_name)" >> $GITHUB_OUTPUT
+          echo "code_bucket=$(terraform output -raw code_bucket_name)" >> $GITHUB_OUTPUT
+      
+      - name: Empty S3 Buckets (all versions)
+        env:
+          DATALAKE_BUCKET: ${{ steps.tf_outputs.outputs.datalake_bucket }}
+          CODE_BUCKET: ${{ steps.tf_outputs.outputs.code_bucket }}
+        run: |
+          for B in "$DATALAKE_BUCKET" "$CODE_BUCKET"; do
+            if [ -n "$B" ]; then
+              while true; do
+                VERS=$(aws s3api list-object-versions --bucket "$B" --query 'Versions[].{Key:Key,VersionId:VersionId}' --output json || echo "[]")
+                DELMS=$(aws s3api list-object-versions --bucket "$B" --query 'DeleteMarkers[].{Key:Key,VersionId:VersionId}' --output json || echo "[]")
+                if [ "$VERS" = "[]" ] && [ "$DELMS" = "[]" ]; then break; fi
+                if [ "$VERS" != "[]" ]; then
+                  echo "{\"Objects\": $VERS, \"Quiet\": false}" > delete.json
+                  aws s3api delete-objects --bucket "$B" --delete file://delete.json || true
+                fi
+                if [ "$DELMS" != "[]" ]; then
+                  echo "{\"Objects\": $DELMS, \"Quiet\": false}" > delete.json
+                  aws s3api delete-objects --bucket "$B" --delete file://delete.json || true
+                fi
+              done
+            fi
+          done
+      
       - name: Terraform Destroy
         working-directory: ./infra/terraform
         run: terraform destroy -auto-approve
