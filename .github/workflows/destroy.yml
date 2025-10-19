@@ -6,7 +6,6 @@ on:
       confirm:
         description: 'Type "destroy" to confirm'
         required: true
-        type: string
 
 permissions:
   id-token: write
