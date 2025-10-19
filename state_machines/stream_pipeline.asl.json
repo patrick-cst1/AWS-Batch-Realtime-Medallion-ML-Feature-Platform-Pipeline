@@ -40,7 +40,8 @@
             "EntryPointArguments.$": "States.Array('--bucket', $.bucket, '--bronze-prefix', $.bronzePrefix, '--silver-prefix', $.silverPrefix, '--gold-prefix', $.goldPrefix, '--feature-group', $.featureGroup, '--window-end-ts', $.window.window_end_ts, '--lookback-minutes', '60', '--watermark-delay-minutes', '2')",
             "SparkSubmitParameters": "--conf spark.executor.cores=1 --conf spark.executor.memory=4g --conf spark.driver.cores=1 --conf spark.driver.memory=4g"
           }
-        }
+        },
+        "ClientToken.$": "States.UUID()"
       },
       "ResultPath": "$.silver",
       "Next": "WaitSilver",
@@ -122,7 +123,8 @@
             "EntryPointArguments.$": "States.Array('--bucket', $.bucket, '--gold-prefix', $.goldPrefix, '--training-prefix', $.trainingPrefix, '--inference-prefix', $.inferencePrefix)",
             "SparkSubmitParameters": "--conf spark.executor.cores=1 --conf spark.executor.memory=4g --conf spark.driver.cores=1 --conf spark.driver.memory=4g"
           }
-        }
+        },
+        "ClientToken.$": "States.UUID()"
       },
       "ResultPath": "$.daily",
       "Next": "WaitDaily",
