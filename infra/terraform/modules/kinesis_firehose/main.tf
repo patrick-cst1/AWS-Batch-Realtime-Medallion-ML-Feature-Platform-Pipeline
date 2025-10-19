@@ -93,7 +93,7 @@ resource "aws_kinesis_firehose_delivery_stream" "main" {
   extended_s3_configuration {
     role_arn            = aws_iam_role.firehose.arn
     bucket_arn          = var.datalake_bucket_arn
-    prefix              = "bronze/streaming/card_authorization/ingest_dt=!{timestamp:yyyy}/!{timestamp:MM}/!{timestamp:dd}/!{timestamp:HH}/!{timestamp:mm}/"
+    prefix              = "bronze/streaming/card_authorization/ts=!{partitionKeyFromQuery:ts}/ingest_dt=!{timestamp:yyyy}/!{timestamp:MM}/!{timestamp:dd}/!{timestamp:HH}/!{timestamp:mm}/"
     error_output_prefix = "bronze/errors/!{firehose:error-output-type}/!{timestamp:yyyy/MM/dd}/"
     buffering_size      = 128
     buffering_interval  = 300
