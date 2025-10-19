@@ -79,22 +79,39 @@ jobs:
           DATALAKE_BUCKET: ${{ steps.tf_outputs.outputs.datalake_bucket }}
           CODE_BUCKET: ${{ steps.tf_outputs.outputs.code_bucket }}
         run: |
+          set -euo pipefail
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo apt-get update -y && sudo apt-get install -y jq
+          fi
           for B in "$DATALAKE_BUCKET" "$CODE_BUCKET"; do
-            if [ -n "$B" ]; then
-              while true; do
-                VERS=$(aws s3api list-object-versions --bucket "$B" --query 'Versions[].{Key:Key,VersionId:VersionId}' --output json || echo "[]")
-                DELMS=$(aws s3api list-object-versions --bucket "$B" --query 'DeleteMarkers[].{Key:Key,VersionId:VersionId}' --output json || echo "[]")
-                if [ "$VERS" = "[]" ] && [ "$DELMS" = "[]" ]; then break; fi
-                if [ "$VERS" != "[]" ]; then
-                  echo "{\"Objects\": $VERS, \"Quiet\": false}" > delete.json
-                  aws s3api delete-objects --bucket "$B" --delete file://delete.json || true
-                fi
-                if [ "$DELMS" != "[]" ]; then
-                  echo "{\"Objects\": $DELMS, \"Quiet\": false}" > delete.json
-                  aws s3api delete-objects --bucket "$B" --delete file://delete.json || true
-                fi
-              done
+            if [ -z "$B" ] || [ "$B" = "None" ]; then
+              echo "Skip empty bucket variable"
+              continue
             fi
+            echo "Emptying bucket: $B"
+            iter=0
+            while true; do
+              iter=$((iter+1))
+              if [ $iter -gt 200 ]; then
+                echo "Safety break after 200 iterations for $B" >&2
+                break
+              fi
+              RESP=$(aws s3api list-object-versions --bucket "$B" --output json || echo '{}')
+              VERS=$(echo "$RESP" | jq -c '[.Versions[]? | {Key:.Key, VersionId:.VersionId}]')
+              DELS=$(echo "$RESP" | jq -c '[.DeleteMarkers[]? | {Key:.Key, VersionId:.VersionId}]')
+              if [ "$VERS" = "[]" ] && [ "$DELS" = "[]" ]; then
+                echo "No more versions or delete markers in $B"
+                break
+              fi
+              if [ "$VERS" != "[]" ]; then
+                echo "{\"Objects\": $VERS, \"Quiet\": false}" > delete.json
+                aws s3api delete-objects --bucket "$B" --delete file://delete.json || true
+              fi
+              if [ "$DELS" != "[]" ]; then
+                echo "{\"Objects\": $DELS, \"Quiet\": false}" > delete.json
+                aws s3api delete-objects --bucket "$B" --delete file://delete.json || true
+              fi
+            done
           done
       
       - name: Terraform Destroy
