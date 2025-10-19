@@ -40,7 +40,7 @@ aws iam get-role --role-name GithubActionsDeployRole --query 'Role.Arn' --output
 ### 2.3 設定 GitHub Secrets
 Repo → Settings → Secrets and variables → Actions：
 - `ASSUME_ROLE_ARN`：上一步輸出的 Role ARN
-- `TF_BACKEND_BUCKET`：`acme-mlfeature-tfstate-dev-ap-southeast-1`
+- `TF_BACKEND_BUCKET`：`acme-mlfeature-tfstate-dev`
 - `TF_BACKEND_DDB_TABLE`：`acme-mlfeature-tflock-dev`
 
 ---
