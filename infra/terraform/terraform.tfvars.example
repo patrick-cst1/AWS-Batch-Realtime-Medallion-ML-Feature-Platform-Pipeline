@@ -1,0 +1,9 @@
+project_name     = "aws-batch-realtime-medallion"
+environment      = "dev"
+aws_region       = "ap-southeast-1"
+emr_release_label = "emr-6.15.0"
+kinesis_shard_count = 1
+s3_lifecycle_days = 30
+stream_pipeline_schedule_minutes = 10
+daily_pipeline_schedule_cron = "cron(0 2 * * ? *)"
+feature_group_name = "rt_card_features_v1"

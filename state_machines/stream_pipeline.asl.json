@@ -1,0 +1,220 @@
+{
+  "Comment": "Unified stream pipeline (10m stream + daily datasets)",
+  "StartAt": "ModeChoice",
+  "States": {
+    "ModeChoice": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.mode",
+          "StringEquals": "stream",
+          "Next": "ComputeWindow"
+        },
+        {
+          "Variable": "$.mode",
+          "StringEquals": "daily",
+          "Next": "RunBuildDatasets"
+        }
+      ],
+      "Default": "FailInvalidMode"
+    },
+    "ComputeWindow": {
+      "Type": "Pass",
+      "Parameters": {
+        "window_end_ts.$": "$.now",
+        "lookback_minutes": 60,
+        "watermark_delay_minutes": 2
+      },
+      "ResultPath": "$.window",
+      "Next": "RunSilverGold"
+    },
+    "RunSilverGold": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:emrserverless:startJobRun",
+      "Parameters": {
+        "ApplicationId.$": "$.emr.appId",
+        "ExecutionRoleArn.$": "$.emr.jobRole",
+        "JobDriver": {
+          "SparkSubmit": {
+            "EntryPoint.$": "States.Format('s3://{}/spark_jobs/silver_and_gold.py', $.codeBucket)",
+            "EntryPointArguments.$": "States.Array('--bucket', $.bucket, '--bronze-prefix', $.bronzePrefix, '--silver-prefix', $.silverPrefix, '--gold-prefix', $.goldPrefix, '--feature-group', $.featureGroup, '--window-end-ts', $.window.window_end_ts, '--lookback-minutes', '60', '--watermark-delay-minutes', '2')",
+            "SparkSubmitParameters": "--conf spark.executor.cores=1 --conf spark.executor.memory=4g --conf spark.driver.cores=1 --conf spark.driver.memory=4g"
+          }
+        }
+      },
+      "ResultPath": "$.silver",
+      "Next": "WaitSilver",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "FailSilverJob"
+        }
+      ]
+    },
+    "WaitSilver": {
+      "Type": "Wait",
+      "Seconds": 20,
+      "Next": "GetSilverStatus"
+    },
+    "GetSilverStatus": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:emrserverless:getJobRun",
+      "Parameters": {
+        "ApplicationId.$": "$.emr.appId",
+        "JobRunId.$": "$.silver.JobRunId"
+      },
+      "ResultPath": "$.silverStatus",
+      "Next": "CheckSilverStatus"
+    },
+    "CheckSilverStatus": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.silverStatus.JobRun.State",
+          "StringEquals": "SUCCESS",
+          "Next": "PutMetricsStream"
+        },
+        {
+          "Or": [
+            {
+              "Variable": "$.silverStatus.JobRun.State",
+              "StringEquals": "FAILED"
+            },
+            {
+              "Variable": "$.silverStatus.JobRun.State",
+              "StringEquals": "CANCELLED"
+            }
+          ],
+          "Next": "FailSilverJob"
+        }
+      ],
+      "Default": "WaitSilver"
+    },
+    "PutMetricsStream": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:cloudwatch:putMetricData",
+      "Parameters": {
+        "Namespace": "P1Unified",
+        "MetricData": [
+          {
+            "MetricName": "StreamPipelineSuccess",
+            "Value": 1,
+            "Unit": "Count"
+          }
+        ]
+      },
+      "End": true
+    },
+    "FailSilverJob": {
+      "Type": "Fail",
+      "Error": "SilverGoldJobFailed",
+      "Cause": "EMR Serverless job for Silver/Gold processing failed"
+    },
+    "RunBuildDatasets": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:emrserverless:startJobRun",
+      "Parameters": {
+        "ApplicationId.$": "$.emr.appId",
+        "ExecutionRoleArn.$": "$.emr.jobRole",
+        "JobDriver": {
+          "SparkSubmit": {
+            "EntryPoint.$": "States.Format('s3://{}/spark_jobs/build_datasets.py', $.codeBucket)",
+            "EntryPointArguments.$": "States.Array('--bucket', $.bucket, '--gold-prefix', $.goldPrefix, '--training-prefix', $.trainingPrefix, '--inference-prefix', $.inferencePrefix)",
+            "SparkSubmitParameters": "--conf spark.executor.cores=1 --conf spark.executor.memory=4g --conf spark.driver.cores=1 --conf spark.driver.memory=4g"
+          }
+        }
+      },
+      "ResultPath": "$.daily",
+      "Next": "WaitDaily",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "FailDailyJob"
+        }
+      ]
+    },
+    "WaitDaily": {
+      "Type": "Wait",
+      "Seconds": 20,
+      "Next": "GetDailyStatus"
+    },
+    "GetDailyStatus": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:emrserverless:getJobRun",
+      "Parameters": {
+        "ApplicationId.$": "$.emr.appId",
+        "JobRunId.$": "$.daily.JobRunId"
+      },
+      "ResultPath": "$.dailyStatus",
+      "Next": "CheckDailyStatus"
+    },
+    "CheckDailyStatus": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.dailyStatus.JobRun.State",
+          "StringEquals": "SUCCESS",
+          "Next": "CrawlGold"
+        },
+        {
+          "Or": [
+            {
+              "Variable": "$.dailyStatus.JobRun.State",
+              "StringEquals": "FAILED"
+            },
+            {
+              "Variable": "$.dailyStatus.JobRun.State",
+              "StringEquals": "CANCELLED"
+            }
+          ],
+          "Next": "FailDailyJob"
+        }
+      ],
+      "Default": "WaitDaily"
+    },
+    "CrawlGold": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:glue:startCrawler",
+      "Parameters": {
+        "Name.$": "$.glue.crawlerName"
+      },
+      "ResultPath": "$.crawl",
+      "Next": "PutMetricsDaily",
+      "Catch": [
+        {
+          "ErrorEquals": ["Glue.CrawlerRunningException"],
+          "Next": "PutMetricsDaily"
+        },
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "PutMetricsDaily"
+        }
+      ]
+    },
+    "PutMetricsDaily": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:cloudwatch:putMetricData",
+      "Parameters": {
+        "Namespace": "P1Unified",
+        "MetricData": [
+          {
+            "MetricName": "DailyPipelineSuccess",
+            "Value": 1,
+            "Unit": "Count"
+          }
+        ]
+      },
+      "End": true
+    },
+    "FailDailyJob": {
+      "Type": "Fail",
+      "Error": "DailyDatasetJobFailed",
+      "Cause": "EMR Serverless job for daily dataset building failed"
+    },
+    "FailInvalidMode": {
+      "Type": "Fail",
+      "Error": "InvalidMode",
+      "Cause": "Mode must be either 'stream' or 'daily'"
+    }
+  }
+}

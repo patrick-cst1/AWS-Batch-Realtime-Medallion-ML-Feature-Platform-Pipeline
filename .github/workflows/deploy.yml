@@ -1,0 +1,104 @@
+name: Deploy Infrastructure
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ap-southeast-1
+  TF_VERSION: 1.5.0
+
+jobs:
+  terraform:
+    name: Deploy with Terraform
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.ASSUME_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-Deploy
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      
+      - name: Terraform Init
+        working-directory: ./infra/terraform
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_BACKEND_BUCKET }}" \
+            -backend-config="key=aws-batch-realtime-medallion/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ secrets.TF_BACKEND_DDB_TABLE }}"
+      
+      - name: Terraform Validate
+        working-directory: ./infra/terraform
+        run: terraform validate
+      
+      - name: Terraform Plan
+        working-directory: ./infra/terraform
+        run: terraform plan -out=tfplan
+      
+      - name: Terraform Apply
+        working-directory: ./infra/terraform
+        run: terraform apply -auto-approve tfplan
+      
+      - name: Get Terraform Outputs
+        id: tf_outputs
+        working-directory: ./infra/terraform
+        run: |
+          echo "code_bucket=$(terraform output -raw code_bucket_name)" >> $GITHUB_OUTPUT
+          echo "datalake_bucket=$(terraform output -raw datalake_bucket_name)" >> $GITHUB_OUTPUT
+          echo "emr_app_id=$(terraform output -raw emr_application_id)" >> $GITHUB_OUTPUT
+          echo "sfn_arn=$(terraform output -raw step_function_arn)" >> $GITHUB_OUTPUT
+      
+      - name: Sync Spark Jobs to S3
+        run: |
+          aws s3 sync spark_jobs/ s3://${{ steps.tf_outputs.outputs.code_bucket }}/spark_jobs/ \
+            --exclude "*.pyc" \
+            --exclude "__pycache__/*"
+      
+      - name: Sync Feature Store Scripts to S3
+        run: |
+          aws s3 sync feature_store/ s3://${{ steps.tf_outputs.outputs.code_bucket }}/feature_store/ \
+            --exclude "*.pyc" \
+            --exclude "__pycache__/*"
+      
+      - name: Update Step Functions State Machine
+        working-directory: ./infra/terraform
+        run: |
+          terraform apply -auto-approve -refresh-only
+      
+      - name: Run Smoke Test (Optional)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          echo "Starting Step Functions execution for smoke test"
+          EXECUTION_ARN=$(aws stepfunctions start-execution \
+            --state-machine-arn ${{ steps.tf_outputs.outputs.sfn_arn }} \
+            --input '{"mode":"stream","now":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","bucket":"${{ steps.tf_outputs.outputs.datalake_bucket }}","codeBucket":"${{ steps.tf_outputs.outputs.code_bucket }}","bronzePrefix":"bronze/streaming","silverPrefix":"silver","goldPrefix":"gold","featureGroup":"rt_card_features_v1","emr":{"appId":"${{ steps.tf_outputs.outputs.emr_app_id }}","jobRole":""}}' \
+            --query 'executionArn' \
+            --output text)
+          echo "Execution ARN: $EXECUTION_ARN"
+      
+      - name: Deploy Summary
+        run: |
+          echo "### Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Region**: ${{ env.AWS_REGION }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Datalake Bucket**: ${{ steps.tf_outputs.outputs.datalake_bucket }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Code Bucket**: ${{ steps.tf_outputs.outputs.code_bucket }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **EMR Application ID**: ${{ steps.tf_outputs.outputs.emr_app_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Step Functions ARN**: ${{ steps.tf_outputs.outputs.sfn_arn }}" >> $GITHUB_STEP_SUMMARY
