@@ -29,7 +29,8 @@ resource "aws_iam_role_policy" "featurestore" {
           "s3:GetObject",
           "s3:PutObject",
           "s3:DeleteObject",
-          "s3:ListBucket"
+          "s3:ListBucket",
+          "s3:GetBucketAcl"
         ]
         Resource = [
           "arn:aws:s3:::${var.datalake_bucket_name}",

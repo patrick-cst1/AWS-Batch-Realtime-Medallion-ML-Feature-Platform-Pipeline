@@ -97,7 +97,7 @@ resource "aws_kinesis_firehose_delivery_stream" "main" {
     error_output_prefix = "bronze/errors/!{firehose:error-output-type}/!{timestamp:yyyy/MM/dd}/"
     buffering_size      = 128
     buffering_interval  = 300
-    compression_format  = "GZIP"
+    compression_format  = "UNCOMPRESSED"
 
     cloudwatch_logging_options {
       enabled         = true
@@ -114,7 +114,9 @@ resource "aws_kinesis_firehose_delivery_stream" "main" {
 
       output_format_configuration {
         serializer {
-          parquet_ser_de {}
+          parquet_ser_de {
+            compression = "GZIP"
+          }
         }
       }
 
