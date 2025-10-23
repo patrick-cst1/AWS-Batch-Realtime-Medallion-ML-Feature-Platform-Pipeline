@@ -74,7 +74,6 @@ def process_bronze_to_silver(spark, bronze_path, silver_path, window_start, wind
     print(f"Writing Silver data to {silver_output}")
     silver_df.write \
         .mode("append") \
-        .partitionBy("dt") \
         .parquet(silver_output)
     
     return silver_df
@@ -132,7 +131,6 @@ def process_silver_to_gold(spark, silver_df, gold_path, window_end, feature_vers
     print(f"Writing Gold data to {gold_output}")
     gold_features.write \
         .mode("append") \
-        .partitionBy("dt") \
         .parquet(gold_output)
     
     return gold_features

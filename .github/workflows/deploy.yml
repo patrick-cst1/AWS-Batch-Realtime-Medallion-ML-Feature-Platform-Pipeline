@@ -64,6 +64,7 @@ jobs:
           echo "code_bucket=$(terraform output -raw code_bucket_name)" >> $GITHUB_OUTPUT
           echo "datalake_bucket=$(terraform output -raw datalake_bucket_name)" >> $GITHUB_OUTPUT
           echo "emr_app_id=$(terraform output -raw emr_application_id)" >> $GITHUB_OUTPUT
+          echo "emr_job_role=$(terraform output -raw emr_job_role_arn)" >> $GITHUB_OUTPUT
           echo "sfn_arn=$(terraform output -raw step_function_arn)" >> $GITHUB_OUTPUT
       
       - name: Sync Spark Jobs to S3
@@ -89,7 +90,7 @@ jobs:
           echo "Starting Step Functions execution for smoke test"
           EXECUTION_ARN=$(aws stepfunctions start-execution \
             --state-machine-arn ${{ steps.tf_outputs.outputs.sfn_arn }} \
-            --input '{"mode":"stream","now":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","bucket":"${{ steps.tf_outputs.outputs.datalake_bucket }}","codeBucket":"${{ steps.tf_outputs.outputs.code_bucket }}","bronzePrefix":"bronze/streaming","silverPrefix":"silver","goldPrefix":"gold","featureGroup":"rt_card_features_v1","emr":{"appId":"${{ steps.tf_outputs.outputs.emr_app_id }}","jobRole":""}}' \
+            --input '{"mode":"stream","now":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","bucket":"${{ steps.tf_outputs.outputs.datalake_bucket }}","codeBucket":"${{ steps.tf_outputs.outputs.code_bucket }}","bronzePrefix":"bronze/streaming","silverPrefix":"silver","goldPrefix":"gold","featureGroup":"rt_card_features_v1","emr":{"appId":"${{ steps.tf_outputs.outputs.emr_app_id }}","jobRole":"${{ steps.tf_outputs.outputs.emr_job_role }}"}}' \
             --query 'executionArn' \
             --output text)
           echo "Execution ARN: $EXECUTION_ARN"

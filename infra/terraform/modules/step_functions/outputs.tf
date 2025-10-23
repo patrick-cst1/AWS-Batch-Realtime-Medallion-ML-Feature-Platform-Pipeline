@@ -12,3 +12,13 @@ output "state_machine_role_arn" {
   description = "Step Functions state machine role ARN"
   value       = aws_iam_role.sfn.arn
 }
+
+output "backfill_state_machine_arn" {
+  description = "Backfill Step Functions state machine ARN"
+  value       = aws_sfn_state_machine.backfill_pipeline.arn
+}
+
+output "backfill_state_machine_name" {
+  description = "Backfill Step Functions state machine name"
+  value       = aws_sfn_state_machine.backfill_pipeline.name
+}
