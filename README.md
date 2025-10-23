@@ -103,7 +103,7 @@ graph TB
     style B fill:#FF9900
     style F fill:#E25A1C
     style G fill:#E25A1C
-    style K fill:#232F3E
+    style K fill:#FF9900,stroke:#232F3E,stroke-width:3px,color:#000
     style E fill:#D86613
 ```
 
@@ -364,31 +364,7 @@ OIDC configured for GitHub Actions
 
 ---
 
-## 💻 Development
-
-### Local Testing of Spark Jobs
-
-```bash
-# Set up local environment
-export AWS_PROFILE=default
-export BUCKET=test-bucket
-
-# Run Silver & Gold processing
-spark-submit \
-  --master local[*] \
-  --conf spark.hadoop.fs.s3a.aws.credentials.provider=com.amazonaws.auth.DefaultAWSCredentialsProviderChain \
-  spark_jobs/silver_and_gold.py \
-  --bucket $BUCKET \
-  --bronze-prefix bronze/streaming \
-  --silver-prefix silver \
-  --gold-prefix gold \
-  --feature-group rt_card_features_v1 \
-  --window-end-ts 2025-10-24T12:00:00Z
-```
-
----
-
-## 📚 Documentation
+##  Documentation
 
 | Document | Description |
 |----------|-------------|
