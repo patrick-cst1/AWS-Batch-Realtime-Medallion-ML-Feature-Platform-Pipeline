@@ -30,7 +30,10 @@ resource "aws_iam_role_policy" "sfn" {
           "emr-serverless:GetJobRun",
           "emr-serverless:CancelJobRun"
         ]
-        Resource = "arn:aws:emr-serverless:*:*:/applications/${var.emr_application_id}/*"
+        Resource = [
+          "arn:aws:emr-serverless:*:*:/applications/${var.emr_application_id}",
+          "arn:aws:emr-serverless:*:*:/applications/${var.emr_application_id}/*"
+        ]
       },
       {
         Effect = "Allow"

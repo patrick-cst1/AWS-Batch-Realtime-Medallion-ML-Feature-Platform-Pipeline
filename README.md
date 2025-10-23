@@ -1,352 +1,391 @@
-# AWS Batch Realtime Medallion ML Feature Platform Pipeline
+<div align="center">
 
-## 概述
+# ⚡ AWS Realtime Medallion ML Feature Platform
 
-呢個係一個基於 AWS 嘅 **Serverless Realtime Medallion Architecture** 同 **ML Feature Platform**，用於處理實時卡交易數據、特徵工程同機器學習數據集建立。
+[![AWS](https://img.shields.io/badge/AWS-%23FF9900.svg?style=for-the-badge&logo=amazon-aws&logoColor=white)](https://aws.amazon.com/)
+[![Terraform](https://img.shields.io/badge/terraform-%235835CC.svg?style=for-the-badge&logo=terraform&logoColor=white)](https://www.terraform.io/)
+[![Apache Spark](https://img.shields.io/badge/Apache%20Spark-E25A1C?style=for-the-badge&logo=apachespark&logoColor=white)](https://spark.apache.org/)
+[![Python](https://img.shields.io/badge/python-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54)](https://www.python.org/)
 
-### 架構特點
+**Enterprise-grade serverless data pipeline for real-time ML feature engineering**
 
-- **Region**: `ap-southeast-1` (Singapore)
-- **數據層級**: Bronze → Silver → Gold (Medallion Architecture)
-- **實時處理**: Kinesis + Firehose + EMR Serverless (每 10 分鐘)
-- **特徵平台**: SageMaker Feature Store (Online + Offline)
-- **批次處理**: 每日輸出 training/ 同 inference/ datasets
-- **編排**: Step Functions single state machine
-- **IaC**: Terraform modules
-- **CI/CD**: GitHub Actions with OIDC
+[📖 Documentation](#documentation) • [🚀 Quick Start](#deployment-guide) • [🧪 Testing](#-end-to-end-testing-guide) • [💰 Cost](#cost-estimation)
+
+</div>
 
 ---
 
-## 架構圖
+## 🎯 Overview
 
-```
-┌─────────────┐     ┌──────────────┐     ┌──────────────┐
-│   Kinesis   │────▶│   Firehose   │────▶│ S3 Bronze/   │
-│ Data Stream │     │              │     │  streaming   │
-└─────────────┘     └──────────────┘     └──────┬───────┘
-                                                 │
-                    ┌────────────────────────────┘
-                    │
-                    ▼
-         ┌──────────────────────┐
-         │  EventBridge         │
-         │  (*/10m & Daily)     │
-         └──────────┬───────────┘
-                    │
-                    ▼
-         ┌──────────────────────┐
-         │  Step Functions      │
-         │  stream_pipeline     │
-         └──────────┬───────────┘
-                    │
-        ┌───────────┴───────────┐
-        │                       │
-        ▼                       ▼
-┌──────────────┐      ┌──────────────────┐
-│ EMR          │      │ EMR              │
-│ Serverless:  │      │ Serverless:      │
-│ silver_and_  │      │ build_datasets   │
-│ gold.py      │      │ .py              │
-└──────┬───────┘      └─────────┬────────┘
-       │                        │
-       ▼                        ▼
-┌─────────────┐         ┌──────────────┐
-│ S3 Silver/  │         │ S3 Gold/     │
-│ Gold/       │         │ training/    │
-└─────────────┘         │ inference/   │
-       │                └──────────────┘
-       │
-       ▼
-┌──────────────────────┐
-│ SageMaker Feature    │
-│ Store (Online +      │
-│ Offline)             │
-└──────────────────────┘
-```
+A production-ready **Serverless Medallion Architecture** built on AWS for processing real-time card transaction data, performing advanced feature engineering, and generating ML-ready datasets.
+
+### ✨ Key Features
+
+<table>
+<tr>
+<td width="50%">
+
+🌍 **Region**  
+`ap-southeast-1` (Singapore)
+
+📊 **Data Architecture**  
+Bronze → Silver → Gold (Medallion)
+
+⚡ **Real-time Processing**  
+Kinesis + Firehose + EMR Serverless
+
+</td>
+<td width="50%">
+
+🎯 **Feature Platform**  
+SageMaker Feature Store (Online + Offline)
+
+📦 **Batch Processing**  
+Daily training & inference datasets
+
+🔄 **Orchestration**  
+Step Functions state machine
+
+</td>
+</tr>
+<tr>
+<td colspan="2">
+
+🏗️ **Infrastructure as Code**: Terraform modules  
+🔁 **CI/CD**: GitHub Actions with OIDC
+
+</td>
+</tr>
+</table>
 
 ---
 
-## 目錄結構
+## 🏗️ Architecture Diagram
+
+<div align="center">
+
+```mermaid
+graph TB
+    subgraph "Ingestion Layer"
+        A[Kinesis Stream] -->|Stream| B[Kinesis Firehose]
+    end
+    
+    subgraph "Storage - Bronze Layer"
+        B -->|JSON.gz| C[S3 Bronze]
+    end
+    
+    subgraph "Orchestration"
+        D[EventBridge Rules]
+        D -->|Every 10min| E[Step Functions]
+        D -->|Daily| E
+    end
+    
+    subgraph "Processing Layer"
+        E -->|Stream Mode| F[EMR Serverless<br/>silver_and_gold.py]
+        E -->|Daily Mode| G[EMR Serverless<br/>build_datasets.py]
+    end
+    
+    subgraph "Storage - Curated Layers"
+        F -->|Parquet| H[S3 Silver]
+        F -->|Parquet| I[S3 Gold]
+        G -->|Parquet| J[S3 Training/Inference]
+    end
+    
+    subgraph "Feature Platform"
+        I -->|Upsert| K[SageMaker Feature Store]
+        K -->|Online Store| L[DynamoDB]
+        K -->|Offline Store| M[S3]
+    end
+    
+    C -.->|Trigger| D
+    
+    style A fill:#FF9900
+    style B fill:#FF9900
+    style F fill:#E25A1C
+    style G fill:#E25A1C
+    style K fill:#FF9900,stroke:#232F3E,stroke-width:3px,color:#000
+    style E fill:#D86613
+```
+
+</div>
+
+---
+
+## 📂 Project Structure
 
 ```
-.
-├── infra/terraform/            # Terraform IaC
-│   ├── main.tf
-│   ├── providers.tf
-│   ├── variables.tf
-│   ├── outputs.tf
-│   └── modules/
-│       ├── s3_datalake/
-│       ├── kinesis_firehose/
-│       ├── emr_serverless/
-│       ├── glue/
-│       ├── sagemaker_featurestore/
-│       ├── step_functions/
-│       ├── eventbridge/
-│       └── cloudwatch/
-├── state_machines/
+📦 AWS-Batch-Realtime-Medallion-ML-Feature-Platform-Pipeline
+├── 🏗️  infra/terraform/                # Infrastructure as Code
+│   ├── 📄 main.tf                      # Root module
+│   ├── 🔧 variables.tf                 # Variable definitions
+│   ├── 📊 outputs.tf                   # Output values
+│   └── 📦 modules/                     # Reusable Terraform modules
+│       ├── 🪣  s3_datalake/            # S3 bucket configuration
+│       ├── 🌊 kinesis_firehose/        # Kinesis streaming setup
+│       ├── ⚡ emr_serverless/          # EMR Serverless config
+│       ├── 🗄️  glue/                   # Glue catalog
+│       ├── 🎯 sagemaker_featurestore/  # Feature Store setup
+│       ├── 🔄 step_functions/          # Workflow orchestration
+│       ├── ⏰ eventbridge/             # Event scheduling
+│       └── 📈 cloudwatch/              # Monitoring & alarms
+├── 🎭 state_machines/                  # Step Functions definitions
 │   └── stream_pipeline.asl.json
-├── spark_jobs/
-│   ├── silver_and_gold.py
-│   └── build_datasets.py
-├── feature_store/
+├── ⚙️  spark_jobs/                     # PySpark processing jobs
+│   ├── silver_and_gold.py              # Bronze → Silver → Gold
+│   └── build_datasets.py               # Training/inference datasets
+├── 🎯 feature_store/                   # Feature Store utilities
 │   ├── register_feature_groups.py
 │   └── ingest_features.py
-├── scripts/
-│   └── generate_synthetic_batch.py
-├── .github/workflows/
-│   ├── deploy.yml
-│   └── destroy.yml
-└── README.md
+├── 🔧 scripts/                         # Utility scripts
+│   └── transform_and_prepare_sample_data.py
+├── 📊 sample_data/                     # Sample transaction data
+│   └── bronze_sample_transactions.json
+├── 🔁 .github/workflows/               # CI/CD pipelines
+│   ├── deploy.yml                      # Deployment workflow
+│   └── destroy.yml                     # Teardown workflow
+├── 📖 DEPLOYMENT_GUIDE.md              # Detailed deployment guide
+├── 🧪 E2E_TESTING_GUIDE.md             # End-to-end testing guide
+├── 📋 requirements.txt                 # Python dependencies
+└── 📝 README.md                        # This file
 ```
 
 ---
 
-## 數據模型
+## 📊 Data Model
 
-### Bronze Layer
-- **Path**: `s3://bucket/bronze/streaming/card_authorization/ingest_dt=YYYY/MM/DD/HH/mm/*.json.gz`
-- **Schema**:
-  - `event_id` (string)
-  - `card_id` (string)
-  - `ts` (timestamp)
-  - `merchant_id` (string)
-  - `amount` (float)
-  - `currency` (string)
-  - `country` (string)
-  - `pos_mode` (string)
+### 🥉 Bronze Layer
+**Raw streaming data ingestion**
 
-### Silver Layer
-- **Path**: `s3://bucket/silver/card_transactions/dt=YYYY-MM-DD/*.parquet`
-- **描述**: 清洗後嘅數據，去重、驗證
+```yaml
+Path: s3://bucket/bronze/streaming/card_authorization/ingest_dt=YYYY/MM/DD/HH/mm/*.json.gz
+Format: Compressed NDJSON
+Schema:
+  - event_id: string       # Unique transaction identifier
+  - card_id: string        # Card identifier
+  - ts: timestamp          # Transaction timestamp (Unix)
+  - merchant_id: string    # Merchant identifier
+  - amount: float          # Transaction amount
+  - currency: string       # Currency code (USD, EUR, etc.)
+  - country: string        # Country code
+  - pos_mode: string       # POS mode (chip, contactless, etc.)
+```
 
-### Gold Layer
-- **Path**: `s3://bucket/gold/card_features/dt=YYYY-MM-DD/*.parquet`
-- **Features**:
-  - `txn_count_1h`: 過去 1 小時交易次數
-  - `txn_amount_1h`: 過去 1 小時交易金額
-  - `merchant_count_24h`: 過去 24 小時唔同商戶數量
-  - `avg_amount_7d`: 過去 7 日平均交易金額
+### 🥈 Silver Layer
+**Cleaned & validated data**
 
-### Training/Inference Datasets
-- **Training**: `s3://bucket/gold/training/dt=YYYY-MM-DD/{train,validation}/*.parquet`
-- **Inference**: `s3://bucket/gold/inference/dt=YYYY-MM-DD/*.parquet`
+```yaml
+Path: s3://bucket/silver/card_transactions/dt=YYYY-MM-DD/*.parquet
+Format: Parquet (Snappy)
+Processing: Deduplication, validation, type casting
+Partitioning: Daily (dt=YYYY-MM-DD)
+```
+
+### 🥇 Gold Layer
+**Feature-enriched data**
+
+```yaml
+Path: s3://bucket/gold/card_features/dt=YYYY-MM-DD/*.parquet
+Format: Parquet (Snappy)
+Features:
+  📈 txn_count_1h: int          # Transactions in last 1 hour
+  💰 txn_amount_1h: float       # Total amount in last 1 hour
+  🏪 merchant_count_24h: int    # Unique merchants in 24 hours
+  📊 avg_amount_7d: float       # 7-day average transaction amount
+```
+
+### 🎓 Training/Inference Datasets
+
+| Dataset | Path | Purpose |
+|---------|------|---------|
+| **Training** | `s3://bucket/gold/training/dt=YYYY-MM-DD/train/*.parquet` | Model training |
+| **Validation** | `s3://bucket/gold/training/dt=YYYY-MM-DD/validation/*.parquet` | Model validation |
+| **Inference** | `s3://bucket/gold/inference/dt=YYYY-MM-DD/*.parquet` | Real-time predictions |
 
 ---
 
-## 部署指南
+## 🚀 Deployment Guide
 
-### 前置要求
+### Prerequisites
 
-1. **AWS Account** with appropriate permissions
-2. **Terraform** >= 1.5.0
-3. **AWS CLI** configured
-4. **GitHub** repository with OIDC configured
+<table>
+<tr>
+<td>
 
-### 環境變數 / Secrets
+**☁️ AWS Account**  
+Appropriate IAM permissions for resource creation
 
-在 GitHub repository 設定以下 secrets：
+</td>
+<td>
 
-- `ASSUME_ROLE_ARN`: OIDC role ARN for GitHub Actions
-- `TF_BACKEND_BUCKET`: S3 bucket for Terraform state
-- `TF_BACKEND_DDB_TABLE`: DynamoDB table for state locking
-- `AWS_ACCOUNT_ID`: Your AWS account ID
+**🔧 AWS CLI**  
+Configured with credentials (`aws configure`)
 
-### 部署步驟
+</td>
+<td>
 
-#### 1. 建立 Terraform Backend
+**🐙 GitHub Repository**  
+OIDC configured for GitHub Actions
 
-```bash
-# 建立 S3 bucket for Terraform state
-aws s3 mb s3://your-terraform-state-bucket --region ap-southeast-1
+</td>
+</tr>
+</table>
 
-# 建立 DynamoDB table for state locking
-aws dynamodb create-table \
-  --table-name terraform-state-lock \
-  --attribute-definitions AttributeName=LockID,AttributeType=S \
-  --key-schema AttributeName=LockID,KeyType=HASH \
-  --provisioned-throughput ReadCapacityUnits=5,WriteCapacityUnits=5 \
-  --region ap-southeast-1
-```
-
-#### 2. 配置 OIDC for GitHub Actions
-
-參考 [AWS documentation](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_create_oidc.html) 設定 GitHub OIDC provider。
-
-#### 3. 本地部署（測試）
-
-```bash
-cd infra/terraform
-
-# Initialize
-terraform init \
-  -backend-config="bucket=your-terraform-state-bucket" \
-  -backend-config="key=aws-batch-realtime-medallion/terraform.tfstate" \
-  -backend-config="region=ap-southeast-1" \
-  -backend-config="dynamodb_table=terraform-state-lock"
-
-# Plan
-terraform plan
-
-# Apply
-terraform apply
-```
-
-#### 4. GitHub Actions 部署
-
-Push to `main` branch 或手動觸發 `deploy.yml` workflow。
+> 📖 **Detailed deployment steps**: See [`DEPLOYMENT_GUIDE.md`](DEPLOYMENT_GUIDE.md) for comprehensive instructions including Terraform Backend setup, GitHub OIDC configuration, and automated CI/CD deployment.
 
 ---
 
-## 使用方法
+## 🧪 End-to-End Testing Guide
 
-### 生成測試數據
-
-```bash
-# 生成一次性批次數據
-python scripts/generate_synthetic_batch.py \
-  --num-transactions 1000 \
-  --kinesis-stream your-stream-name \
-  --region ap-southeast-1
-
-# 連續生成數據 (10 TPS)
-python scripts/generate_synthetic_batch.py \
-  --continuous \
-  --rate 10 \
-  --kinesis-stream your-stream-name \
-  --region ap-southeast-1
-```
-
-### 手動觸發 Pipeline
-
-```bash
-# Stream mode (processing)
-aws stepfunctions start-execution \
-  --state-machine-arn arn:aws:states:ap-southeast-1:ACCOUNT:stateMachine:stream-pipeline \
-  --input file://stream_input.json
-
-# Daily mode (datasets)
-aws stepfunctions start-execution \
-  --state-machine-arn arn:aws:states:ap-southeast-1:ACCOUNT:stateMachine:stream-pipeline \
-  --input file://daily_input.json
-```
-
-### 查詢 Feature Store
-
-```python
-from feature_store.ingest_features import FeatureStoreIngester
-
-ingester = FeatureStoreIngester(feature_group_name="rt_card_features_v1")
-record = ingester.get_record("card_001")
-print(record)
-```
+> 🔬 **Complete testing procedures**: Refer to [`E2E_TESTING_GUIDE.md`](E2E_TESTING_GUIDE.md) for:
+> - 📤 Sample data preparation
+> - ⚡ Pipeline triggering (stream & batch modes)
+> - 👀 Monitoring & observability
+> - ✅ Result verification
 
 ---
 
-## Monitoring
+## 📈 Monitoring
 
 ### CloudWatch Dashboard
 
-訪問: AWS Console → CloudWatch → Dashboards → `{project}-{env}-dashboard`
+<div align="center">
 
-包含以下 metrics：
-- Step Functions 執行狀態
-- EMR Serverless job 成功率
-- Kinesis Firehose delivery 成功率
-- Custom pipeline metrics
+**Access Path**: AWS Console → CloudWatch → Dashboards → `{project}-{env}-dashboard`
 
-### Alarms
+| Metric | Description |
+|--------|-------------|
+| 🔄 **Step Functions Status** | Execution success/failure rates |
+| ⚡ **EMR Job Success Rate** | Spark job completion metrics |
+| 🌊 **Firehose Delivery Rate** | Stream delivery performance |
+| 📊 **Custom Pipeline Metrics** | End-to-end processing latency |
 
-- **SFN Execution Failed**: Step Functions 執行失敗
-- **Firehose Delivery Failed**: Firehose delivery 成功率低於 95%
+</div>
 
----
+### ⚠️ Alarms
 
-## 成本估算
-
-以 **dev** 環境為例（每日約 1M events）：
-
-| Service | Usage | Estimated Cost |
-|---------|-------|----------------|
-| Kinesis Data Stream | 1 shard, 24/7 | $11/month |
-| Kinesis Firehose | 1M records | $5/month |
-| S3 Storage | 100 GB | $2.3/month |
-| EMR Serverless | 144 runs/day, 5min each | $20/month |
-| Step Functions | 144 executions/day | $0.03/month |
-| SageMaker Feature Store | 1M writes, 100K reads | $10/month |
-| **Total** | | **~$50/month** |
-
-**建議**:
-- 使用 S3 Lifecycle policies (30 days retention)
-- EMR Serverless auto-stop (15 min idle)
-- Kinesis on-demand mode for variable workloads
+| Alarm | Trigger Condition | Action |
+|-------|-------------------|--------|
+| 🚨 **SFN Execution Failed** | Step Functions execution failure | SNS notification |
+| 🚨 **Firehose Delivery Failed** | Success rate < 95% | SNS notification |
 
 ---
 
-## Troubleshooting
+## 💰 Cost Estimation
 
-### EMR Job 失敗
+<div align="center">
 
-1. 檢查 CloudWatch Logs: `/aws/emr-serverless/applications/{app-id}/jobs/{job-id}`
-2. 驗證 S3 permissions
-3. 檢查 Spark job code syntax
+**Development Environment** • ~1M events/day
 
-### Feature Store Upsert 失敗
+| Service | Usage | Monthly Cost |
+|:--------|:------|:------------:|
+| 🌊 Kinesis Data Stream | 1 shard, 24/7 | **$11** |
+| 🔥 Kinesis Firehose | 1M records | **$5** |
+| 🪣 S3 Storage | 100 GB | **$2.3** |
+| ⚡ EMR Serverless | 144 runs/day, 5min each | **$20** |
+| 🔄 Step Functions | 144 executions/day | **$0.03** |
+| 🎯 SageMaker Feature Store | 1M writes, 100K reads | **$10** |
+| | **Total Estimate** | **~$50/month** |
 
-1. 確保 Feature Group 已建立並處於 `Created` 狀態
-2. 檢查 IAM role permissions (`sagemaker-featurestore-runtime:BatchPutRecord`)
-3. 驗證 feature definitions 同 data schema 一致
+</div>
 
-### Step Functions 超時
+### 💡 Cost Optimization Tips
 
-1. 增加 EMR Serverless capacity
-2. 調整 `WaitSilver` / `WaitDaily` 嘅 `Seconds` 值
-3. 檢查 EMR job 係咪卡喺某個 stage
-
----
-
-## Development
-
-### 本地測試 Spark Jobs
-
-```bash
-# 使用 local Spark
-spark-submit \
-  --master local[*] \
-  spark_jobs/silver_and_gold.py \
-  --bucket test-bucket \
-  --bronze-prefix bronze/streaming \
-  --silver-prefix silver \
-  --gold-prefix gold \
-  --feature-group rt_card_features_v1 \
-  --window-end-ts 2025-10-19T12:00:00Z
+```yaml
+✅ S3 Lifecycle Policies: 30-day retention → Save on storage
+✅ EMR Auto-stop: 15min idle timeout → Pay only for active jobs  
+✅ Kinesis On-Demand: Variable workloads → No over-provisioning
+✅ EventBridge Disable: Manual triggering during dev → Near-zero fixed costs
 ```
 
 ---
 
-## 參考資料
+## 🔧 Troubleshooting
 
-- [AWS EMR Serverless](https://docs.aws.amazon.com/emr/latest/EMR-Serverless-UserGuide/)
-- [SageMaker Feature Store](https://docs.aws.amazon.com/sagemaker/latest/dg/feature-store.html)
-- [Step Functions](https://docs.aws.amazon.com/step-functions/)
+<details>
+<summary><b>⚡ EMR Job Failure</b></summary>
+
+1. **Check CloudWatch Logs**
+   ```bash
+   aws logs tail /aws/emr-serverless/applications/{app-id}/jobs/{job-id} --follow
+   ```
+
+2. **Verify S3 Permissions**
+   - Ensure EMR job role has `s3:GetObject`, `s3:PutObject` permissions
+   - Check bucket policies and ACLs
+
+3. **Validate Spark Code**
+   - Test locally with `spark-submit --master local[*]`
+   - Check for Python syntax errors or missing dependencies
+
+</details>
+
+<details>
+<summary><b>🎯 Feature Store Upsert Failure</b></summary>
+
+1. **Check Feature Group Status**
+   ```bash
+   aws sagemaker describe-feature-group --feature-group-name rt_card_features_v1
+   ```
+   Status should be `Created`
+
+2. **Verify IAM Permissions**
+   - Role needs: `sagemaker-featurestore-runtime:BatchPutRecord`
+   - Check trust relationship for SageMaker service
+
+3. **Validate Schema Consistency**
+   - Ensure feature definitions match data schema
+   - Check data types (String, Integral, Fractional)
+
+</details>
+
+<details>
+<summary><b>🔄 Step Functions Timeout</b></summary>
+
+1. **Increase EMR Capacity**
+   ```hcl
+   # In terraform.tfvars
+   emr_driver_cores = 2
+   emr_executor_cores = 2
+   ```
+
+2. **Adjust Wait States**
+   ```json
+   {
+     "Type": "Wait",
+     "Seconds": 300  // Increase if needed
+   }
+   ```
+
+3. **Check Job Bottlenecks**
+   - Review Spark UI for stage-level metrics
+   - Identify data skew or shuffle operations
+
+</details>
 
 ---
 
-## License
+##  Documentation
 
-MIT License - Patrick Cheung
-
----
-
-## Roadmap
-
-- [ ] M0: Infrastructure setup
-- [ ] M1: Streaming pipeline (P1 Unified)
-- [ ] M2: Daily datasets pipeline
-- [ ] M3: Documentation & CI/CD integration
-- [ ] Future: Model training integration (out-of-scope for this repo)
+| Document | Description |
+|----------|-------------|
+| 📖 [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) | Step-by-step deployment instructions |
+| 🧪 [E2E_TESTING_GUIDE.md](E2E_TESTING_GUIDE.md) | End-to-end testing procedures |
+| 🔗 [AWS EMR Serverless](https://docs.aws.amazon.com/emr/latest/EMR-Serverless-UserGuide/) | Official EMR documentation |
+| 🔗 [SageMaker Feature Store](https://docs.aws.amazon.com/sagemaker/latest/dg/feature-store.html) | Feature Store guide |
+| 🔗 [AWS Step Functions](https://docs.aws.amazon.com/step-functions/) | Workflow orchestration |
 
 ---
 
-**Author**: Patrick Cheung  
-**Last Updated**: 2025-10-19
+<div align="center">
+
+## 📄 License
+
+**MIT License** - Patrick Cheung
+
+---
+
+**Author**: Patrick Cheung | **Last Updated**: October 24, 2025
+
+⭐ **Star this repo** if you find it useful!
+
+</div>
