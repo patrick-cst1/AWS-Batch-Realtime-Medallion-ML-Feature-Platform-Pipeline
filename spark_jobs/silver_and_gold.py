@@ -29,6 +29,7 @@ def parse_args():
     parser.add_argument("--window-end-ts", required=True, help="Window end timestamp")
     parser.add_argument("--lookback-minutes", type=int, default=60, help="Lookback minutes")
     parser.add_argument("--watermark-delay-minutes", type=int, default=2, help="Watermark delay")
+    parser.add_argument("--feature-version", default="v1", help="Feature version")
     return parser.parse_args()
 
 
@@ -79,11 +80,11 @@ def process_bronze_to_silver(spark, bronze_path, silver_path, window_start, wind
     return silver_df
 
 
-def process_silver_to_gold(spark, silver_df, gold_path, window_end):
+def process_silver_to_gold(spark, silver_df, gold_path, window_end, feature_version="v1"):
     """
     Perform feature engineering from Silver to Gold
     """
-    print("Processing Silver to Gold with feature engineering")
+    print(f"Processing Silver to Gold with feature engineering (version: {feature_version})")
     
     # Convert timestamp to datetime
     feature_df = silver_df.withColumn(
@@ -96,13 +97,15 @@ def process_silver_to_gold(spark, silver_df, gold_path, window_end):
     window_24h = Window.partitionBy("card_id").orderBy("ts").rangeBetween(-86400, 0)
     window_7d = Window.partitionBy("card_id").orderBy("ts").rangeBetween(-604800, 0)
     
-    # Feature engineering
+    # Feature engineering (version-specific logic can be customized here)
     gold_df = feature_df \
         .withColumn("txn_count_1h", count("*").over(window_1h)) \
         .withColumn("txn_amount_1h", spark_sum("amount").over(window_1h)) \
         .withColumn("merchant_count_24h", countDistinct("merchant_id").over(window_24h)) \
         .withColumn("avg_amount_7d", avg("amount").over(window_7d)) \
-        .withColumn("event_time", col("ts").cast("double"))
+        .withColumn("event_time", col("ts").cast("double")) \
+        .withColumn("feature_version", lit(feature_version)) \
+        .withColumn("processing_timestamp", lit(datetime.utcnow().isoformat()))
     
     # Select final features
     gold_features = gold_df.select(
@@ -117,7 +120,9 @@ def process_silver_to_gold(spark, silver_df, gold_path, window_end):
         "txn_count_1h",
         "txn_amount_1h",
         "merchant_count_24h",
-        "avg_amount_7d"
+        "avg_amount_7d",
+        "feature_version",
+        "processing_timestamp"
     )
     
     # Write to Gold
@@ -204,7 +209,7 @@ def main():
         
         # Process Silver to Gold
         gold_df = process_silver_to_gold(
-            spark, silver_df, gold_path, window_end.isoformat()
+            spark, silver_df, gold_path, window_end.isoformat(), args.feature_version
         )
         
         # Upsert to Feature Store

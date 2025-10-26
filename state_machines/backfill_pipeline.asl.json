@@ -1,0 +1,149 @@
+{
+  "Comment": "Backfill pipeline for reprocessing historical features",
+  "StartAt": "ValidateInput",
+  "States": {
+    "ValidateInput": {
+      "Type": "Pass",
+      "Parameters": {
+        "bucket.$": "$.bucket",
+        "codeBucket.$": "$.codeBucket",
+        "startDate.$": "$.startDate",
+        "endDate.$": "$.endDate",
+        "featureVersion.$": "States.Format('{}', $.featureVersion)",
+        "chunkSizeDays.$": "States.Format('{}'  , States.MathAdd($.chunkSizeDays, 0))",
+        "overwrite.$": "$.overwrite",
+        "dryRun.$": "$.dryRun",
+        "bronzePrefix": "bronze/streaming",
+        "silverPrefix": "silver",
+        "goldPrefix": "gold",
+        "featureGroup.$": "$.featureGroup",
+        "emr.$": "$.emr"
+      },
+      "ResultPath": "$.validated",
+      "Next": "RunBackfillJob"
+    },
+    "RunBackfillJob": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:emrserverless:startJobRun",
+      "Parameters": {
+        "ApplicationId.$": "$.emr.appId",
+        "ExecutionRoleArn.$": "$.emr.jobRole",
+        "JobDriver": {
+          "SparkSubmit": {
+            "EntryPoint.$": "States.Format('s3://{}/spark_jobs/backfill_features.py', $.codeBucket)",
+            "EntryPointArguments.$": "States.Array('--bucket', $.bucket, '--bronze-prefix', $.validated.bronzePrefix, '--silver-prefix', $.validated.silverPrefix, '--gold-prefix', $.validated.goldPrefix, '--feature-group', $.featureGroup, '--start-date', $.startDate, '--end-date', $.endDate, '--feature-version', $.validated.featureVersion, '--chunk-size-days', $.validated.chunkSizeDays)",
+            "SparkSubmitParameters": "--conf spark.executor.cores=2 --conf spark.executor.memory=8g --conf spark.driver.cores=2 --conf spark.driver.memory=8g --conf spark.executor.instances=4"
+          }
+        },
+        "ClientToken.$": "States.UUID()"
+      },
+      "ResultPath": "$.backfillJob",
+      "Next": "WaitBackfill",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "FailBackfillJob",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+    "WaitBackfill": {
+      "Type": "Wait",
+      "Seconds": 30,
+      "Next": "GetBackfillStatus"
+    },
+    "GetBackfillStatus": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:emrserverless:getJobRun",
+      "Parameters": {
+        "ApplicationId.$": "$.emr.appId",
+        "JobRunId.$": "$.backfillJob.JobRunId"
+      },
+      "ResultPath": "$.backfillStatus",
+      "Next": "CheckBackfillStatus"
+    },
+    "CheckBackfillStatus": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.backfillStatus.JobRun.State",
+          "StringEquals": "SUCCESS",
+          "Next": "CrawlGoldData"
+        },
+        {
+          "Or": [
+            {
+              "Variable": "$.backfillStatus.JobRun.State",
+              "StringEquals": "FAILED"
+            },
+            {
+              "Variable": "$.backfillStatus.JobRun.State",
+              "StringEquals": "CANCELLED"
+            }
+          ],
+          "Next": "FailBackfillJob"
+        }
+      ],
+      "Default": "WaitBackfill"
+    },
+    "CrawlGoldData": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:glue:startCrawler",
+      "Parameters": {
+        "Name.$": "$.glue.crawlerName"
+      },
+      "ResultPath": "$.crawl",
+      "Next": "PutBackfillMetrics",
+      "Catch": [
+        {
+          "ErrorEquals": ["Glue.CrawlerRunningException"],
+          "Next": "PutBackfillMetrics"
+        },
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "PutBackfillMetrics"
+        }
+      ]
+    },
+    "PutBackfillMetrics": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:cloudwatch:putMetricData",
+      "Parameters": {
+        "Namespace": "P1Unified",
+        "MetricData": [
+          {
+            "MetricName": "BackfillPipelineSuccess",
+            "Value": 1,
+            "Unit": "Count",
+            "Dimensions": [
+              {
+                "Name": "FeatureVersion",
+                "Value.$": "$.validated.featureVersion"
+              }
+            ]
+          }
+        ]
+      },
+      "Next": "BackfillComplete"
+    },
+    "BackfillComplete": {
+      "Type": "Pass",
+      "Parameters": {
+        "message": "Backfill completed successfully",
+        "jobRunId.$": "$.backfillJob.JobRunId",
+        "dateRange": {
+          "start.$": "$.startDate",
+          "end.$": "$.endDate"
+        },
+        "featureVersion.$": "$.validated.featureVersion",
+        "executionArn.$": "$$.Execution.Name"
+      },
+      "End": true
+    },
+    "FailBackfillJob": {
+      "Type": "Fail",
+      "Error": "BackfillJobFailed",
+      "Cause": "EMR Serverless backfill job failed or was cancelled"
+    }
+  }
+}
