@@ -105,7 +105,10 @@ resource "aws_sfn_state_machine" "stream_pipeline" {
   name     = "${var.project_name}-${var.environment}-stream-pipeline"
   role_arn = aws_iam_role.sfn.arn
 
-  definition = file("${path.root}/../../state_machines/stream_pipeline.asl.json")
+  definition = templatefile("${path.root}/../../state_machines/stream_pipeline.asl.json", {
+    emr_job_role_arn   = var.emr_job_role_arn,
+    emr_application_id = var.emr_application_id
+  })
 
   logging_configuration {
     log_destination        = "${aws_cloudwatch_log_group.sfn.arn}:*"

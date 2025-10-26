@@ -47,20 +47,27 @@ resource "aws_cloudwatch_event_target" "stream" {
   arn       = var.state_machine_arn
   role_arn  = aws_iam_role.eventbridge.arn
 
-  input = jsonencode({
-    mode         = "stream"
-    now          = "$.time"
-    bucket       = var.datalake_bucket_name
-    codeBucket   = var.code_bucket_name
-    bronzePrefix = "bronze/streaming"
-    silverPrefix = "silver"
-    goldPrefix   = "gold"
-    featureGroup = var.feature_group_name
-    emr = {
-      appId   = var.emr_application_id
-      jobRole = var.emr_job_role_arn
+  input_transformer {
+    input_paths = {
+      time = "$.time"
     }
-  })
+    input_template = <<EOF
+{
+  "mode": "stream",
+  "now": <time>,
+  "bucket": "${var.datalake_bucket_name}",
+  "codeBucket": "${var.code_bucket_name}",
+  "bronzePrefix": "bronze/streaming",
+  "silverPrefix": "silver",
+  "goldPrefix": "gold",
+  "featureGroup": "${var.feature_group_name}",
+  "emr": {
+    "appId": "${var.emr_application_id}",
+    "jobRole": "${var.emr_job_role_arn}"
+  }
+}
+EOF
+  }
 }
 
 # EventBridge Rule for Daily Pipeline
@@ -76,20 +83,25 @@ resource "aws_cloudwatch_event_target" "daily" {
   arn       = var.state_machine_arn
   role_arn  = aws_iam_role.eventbridge.arn
 
-  input = jsonencode({
-    mode             = "daily"
-    bucket           = var.datalake_bucket_name
-    codeBucket       = var.code_bucket_name
-    goldPrefix       = "gold"
-    trainingPrefix   = "gold/training"
-    inferencePrefix  = "gold/inference"
-    featureGroup     = var.feature_group_name
-    emr = {
-      appId   = var.emr_application_id
-      jobRole = var.emr_job_role_arn
-    }
-    glue = {
-      crawlerName = "${var.project_name}-${var.environment}-gold-crawler"
-    }
-  })
+  input_transformer {
+    input_paths = {}
+    input_template = <<EOF
+{
+  "mode": "daily",
+  "bucket": "${var.datalake_bucket_name}",
+  "codeBucket": "${var.code_bucket_name}",
+  "goldPrefix": "gold",
+  "trainingPrefix": "gold/training",
+  "inferencePrefix": "gold/inference",
+  "featureGroup": "${var.feature_group_name}",
+  "emr": {
+    "appId": "${var.emr_application_id}",
+    "jobRole": "${var.emr_job_role_arn}"
+  },
+  "glue": {
+    "crawlerName": "${var.project_name}-${var.environment}-gold-crawler"
+  }
+}
+EOF
+  }
 }

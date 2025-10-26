@@ -32,8 +32,8 @@
       "Type": "Task",
       "Resource": "arn:aws:states:::aws-sdk:emrserverless:startJobRun",
       "Parameters": {
-        "ApplicationId.$": "$.emr.appId",
-        "ExecutionRoleArn.$": "$.emr.jobRole",
+        "ApplicationId": "${emr_application_id}",
+        "ExecutionRoleArn": "${emr_job_role_arn}",
         "JobDriver": {
           "SparkSubmit": {
             "EntryPoint.$": "States.Format('s3://{}/spark_jobs/silver_and_gold.py', $.codeBucket)",
@@ -116,7 +116,7 @@
       "Resource": "arn:aws:states:::aws-sdk:emrserverless:startJobRun",
       "Parameters": {
         "ApplicationId.$": "$.emr.appId",
-        "ExecutionRoleArn.$": "$.emr.jobRole",
+        "ExecutionRoleArn": "${emr_job_role_arn}",
         "JobDriver": {
           "SparkSubmit": {
             "EntryPoint.$": "States.Format('s3://{}/spark_jobs/build_datasets.py', $.codeBucket)",
