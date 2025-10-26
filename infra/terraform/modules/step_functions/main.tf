@@ -117,3 +117,21 @@ resource "aws_sfn_state_machine" "stream_pipeline" {
     enabled = true
   }
 }
+
+# Backfill Step Functions State Machine
+resource "aws_sfn_state_machine" "backfill_pipeline" {
+  name     = "${var.project_name}-${var.environment}-backfill-pipeline"
+  role_arn = aws_iam_role.sfn.arn
+
+  definition = file("${path.root}/../../state_machines/backfill_pipeline.asl.json")
+
+  logging_configuration {
+    log_destination        = "${aws_cloudwatch_log_group.sfn.arn}:*"
+    include_execution_data = true
+    level                  = "ERROR"
+  }
+
+  tracing_configuration {
+    enabled = true
+  }
+}

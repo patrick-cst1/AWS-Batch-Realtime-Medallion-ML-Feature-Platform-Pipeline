@@ -33,6 +33,11 @@ output "step_function_arn" {
   value       = module.step_functions.state_machine_arn
 }
 
+output "backfill_step_function_arn" {
+  description = "Backfill Step Functions state machine ARN"
+  value       = module.step_functions.backfill_state_machine_arn
+}
+
 output "glue_database_name" {
   description = "Glue Catalog database name"
   value       = module.glue.database_name
